@@ -2,14 +2,24 @@
 #set -e
 #set -x
 
-## TO DO: compression
-## TO DO: encryption
 ## TO DO: doc
 
+tmpDir=/restore
 backupDir=/backup
 retention=7
 userfile=/.myuser
 passfile=/.mypasswd
+keyfile=/.mykey
+
+cleanDir(){
+  t=$1
+  if [ -d $t ]; then
+    rm -rf $t
+    if [ ! $? -eq 0 ]; then echo "cannot clean ${t}"; exit 1; fi
+  fi
+  mkdir -p $t
+  if [ ! $? -eq 0 ]; then echo "cannot make directory ${t}"; exit 1; fi
+}
 
 doPrepare(){
   dir=$1
@@ -17,24 +27,10 @@ doPrepare(){
     mkdir -p $dir;
     if [ ! $? -eq 0 ]; then echo "cannot make directory $dir"; exit 1; fi
   fi
-  if [ ! -d $dir/archive ]; then
-    mkdir -p $dir/archive;
-    if [ ! $? -eq 0 ]; then echo "cannot make directory $dir/archive"; exit 1; fi
+  if [ ! -f $dir/next ]; then
+    echo "0" > $dir/next;
+    if [ ! $? -eq 0 ]; then echo "cannot create file $dir/next"; exit 1; fi
   fi
-  if [ ! -d $dir/ready ]; then
-    mkdir $dir/ready;
-    if [ ! $? -eq 0 ]; then echo "cannot make directory $dir/ready"; exit 1; fi
-  fi
-  if [ ! -d $dir/latest ]; then
-    mkdir $dir/latest;
-    if [ ! $? -eq 0 ]; then echo "cannot make directory $dir/latest"; exit 1; fi
-  fi
-  if [ ! -f $dir/latest/next ]; then
-    echo "0" > $dir/latest/next;
-    if [ ! $? -eq 0 ]; then echo "cannot create file $dir/latest/next"; exit 1; fi
-  fi
-  #if [ ! -d $dir/latest/full ]; then mkdir -p $dir/latest/full; fi
-  #if [ ! -d $dir/latest/inc0 ]; then mkdir -p $dir/latest/inc0; fi
 }
 
 doFull(){
@@ -42,78 +38,98 @@ doFull(){
   retention=$2
   u=$3
   p=$4
+  k=$5
+  tmp=$6
 
-  if [ -d $dir/archive/full.${retention} ]; then
-    rm $dir/archive/full.${retention}
-    if [ ! $? -eq 0 ]; then echo "cannot remove $dir/archive/full.${retention}"; exit 1; fi
+  if [ -f $dir/full${retention}.gz.enc ]; then
+    rm $dir/full${retention}.gz.enc
+    if [ ! $? -eq 0 ]; then echo "cannot remove $dir/full${retention}.gz.enc"; exit 1; fi
   fi
   i=`expr $retention - 1`
   while [ $i -ge 0 ]; do
-    if [ -d ${dir}/archive/full.${i} ]; then
-      mv ${dir}/archive/full.${i} ${dir}/archive/full.`expr $i + 1`
-      if [ ! $? -eq 0 ]; then echo "cannot rename $dir/archive/full.${i}"; exit 1; fi
+    if [ -f ${dir}/full${i}.gz.enc ]; then
+      mv ${dir}/full${i}.gz.enc ${dir}/full`expr $i + 1`.gz.enc
+      if [ ! $? -eq 0 ]; then echo "cannot rename $dir/full${i}.gz.enc"; exit 1; fi
     fi
     i=`expr $i - 1`
   done
-  if [ -d ${dir}/latest/full ]; then
-    mv ${dir}/latest/full ${dir}/archive/full.0
-    if [ ! $? -eq 0 ]; then echo "cannot rename $dir/archive/full"; exit 1; fi
+  if [ -f ${dir}/full.gz.enc ]; then
+    mv ${dir}/full.gz.enc ${dir}/full0.gz.enc
+    if [ ! $? -eq 0 ]; then echo "cannot rename $dir/full.gz.enc"; exit 1; fi
   fi
   
-  mkdir ${dir}/latest/full
-  if [ ! $? -eq 0 ]; then echo "cannot make $dir/latest/full"; exit 1; fi
-  rm -rf ${dir}/latest/inc*
-  if [ ! $? -eq 0 ]; then echo "cannot clean $dir/latest/inc directories"; exit 1; fi
+  find ${dir}/inc*.gz.enc > /dev/null 2>&1
+  if [ $? -eq 0 ]; then
+    rm ${dir}/inc*.gz.enc
+    if [ ! $? -eq 0 ]; then echo "cannot clean incremental backups"; exit 1; fi
+  fi
 
-  echo "0" > ${dir}/latest/next
-  if [ ! $? -eq 0 ]; then echo "cannot reset counter in $dir/latest/next directories"; exit 1; fi
+  echo "0" > ${dir}/next
+  if [ ! $? -eq 0 ]; then echo "cannot reset counter in $dir/next"; exit 1; fi
 
-  mariabackup --backup --target-dir=${dir}/latest/full --user=$u --password=$p
+  mariabackup --backup --user=$u --password=$p --stream=xbstream |gzip | openssl enc -aes-256-cbc -k $k > ${dir}/full.gz.enc
   if [ ! $? -eq 0 ]; then echo "backup failed"; exit 1; fi
-
-  if [ -d ${dir}/ready ]; then rm -rf ${dir}/ready.new; fi
-  cp -rp ${dir}/latest/full ${dir}/ready.new
-
-  mariabackup --prepare --target-dir=${dir}/ready.new
-  if [ ! $? -eq 0 ]; then echo "restore preparation failed"; exit 1; fi
-
-  rm -rf ${dir}/ready
-  if [ ! $? -eq 0 ]; then echo "cannot clean $dir/ready directory"; exit 1; fi
-  mv ${dir}/ready.new ${dir}/ready
-  if [ ! $? -eq 0 ]; then echo "cannot rename $dir/ready.new"; exit 1; fi
 }
 
 doInc(){
   dir=$1
   u=$2
   p=$3
+  k=$4
+  tmp=$5
 
-  cur=`cat ${dir}/latest/next`
-  if [ ! $? -eq 0 ]; then echo "cannot read $dir/latest/next file"; exit 1; fi
-  echo `expr $cur + 1` > ${dir}/latest/next
-  if [ ! $? -eq 0 ]; then echo "cannot update $dir/latest/next file"; exit 1; fi
+  cur=`cat ${dir}/next`
+  if [ ! $? -eq 0 ]; then echo "cannot read $dir/next file"; exit 1; fi
+  echo `expr $cur + 1` > ${dir}/next
+  if [ ! $? -eq 0 ]; then echo "cannot update $dir/next file"; exit 1; fi
 
-  if [ -d ${dir}/latest/inc${cur} ]; then
-    rm -rf ${dir}/latest/inc${cur}
-    if [ ! $? -eq 0 ]; then echo "cannot clean $dir/latest/inc directories"; exit 1; fi
+  if [ -f ${dir}/inc${cur}.gz.enc ]; then
+    rm ${dir}/inc${cur}.gz.enc
+    if [ ! $? -eq 0 ]; then echo "cannot clean ${dir}/inc${cur}.gz.enc"; exit 1; fi
   fi
-  mkdir -p ${dir}/latest/inc${cur}
-  if [ ! $? -eq 0 ]; then echo "cannot make $dir/latest/inc${cur} directory"; exit 1; fi
+
+  cleanDir $tmp
 
   if [ $cur -eq 0 ]; then
-    incrementalBasedir=${dir}/latest/full
+    cd $tmp
+    openssl enc -d -aes-256-cbc -k $k -in ${dir}/full.gz.enc |gzip -d| mbstream -x
   else
-    incrementalBasedir=${dir}/latest/inc`expr $cur - 1`
+    lastInc=${dir}/inc`expr $cur - 1`.gz.enc
+    cd $tmp
+    openssl enc -d -aes-256-cbc -k $k -in ${lastInc} |gzip -d| mbstream -x
   fi
-  mariabackup --backup --target-dir=${dir}/latest/inc${cur}/ --incremental-basedir=${incrementalBasedir} --user=$u --password=$p
-  if [ ! $? -eq 0 ]; then echo "backup failed"; exit 1; fi
 
-  mariabackup --prepare --target-dir=${dir}/ready --incremental-dir=${dir}/latest/inc${cur}
-  if [ ! $? -eq 0 ]; then echo "restore preparation failed"; exit 1; fi
+  mariabackup --backup --incremental-basedir=${tmp} --user=$u --password=$p --stream=xbstream |gzip | openssl enc -aes-256-cbc -k $k > ${dir}/inc${cur}.gz.enc
+  if [ ! $? -eq 0 ]; then echo "backup failed"; exit 1; fi
 }
 
 doRestore(){
-  mariabackup --copy-back --target-dir=$1/ready
+  dir=$1
+  k=$2
+  tmp=$3
+
+  next=`cat ${dir}/next`
+  last=`expr $next - 1`
+
+  cleanDir ${tmp}
+  mkdir -p ${tmp}/ready
+  mkdir -p ${tmp}/extract
+
+  cd $tmp/ready
+  openssl enc -d -aes-256-cbc -k $k -in ${dir}/full.gz.enc |gzip -d| mbstream -x
+  cd ${tmp}
+  mariabackup --prepare --target-dir=${tmp}/ready
+
+  for i in `seq 0 1 ${last}`; do
+    cleanDir "${tmp}/extract"
+
+    cd ${tmp}/extract
+    openssl enc -d -aes-256-cbc -k $k -in ${dir}/inc${i}.gz.enc |gzip -d| mbstream -x
+    cd ${tmp}
+    mariabackup --prepare --target-dir=${tmp}/ready --incremental-dir=${tmp}/extract
+  done
+
+  mariabackup --copy-back --target-dir=${tmp}/ready
 }
 
 help(){
@@ -124,16 +140,18 @@ help(){
   echo "Possible parameters:"
   echo "* -d: backup directory. By default: /backup"
   echo "* -r: retention: number of full backup to keep. By default: 7"
+  echo "* -t: working directory. By default: /restore"
   echo "* -u: username file. Default /.myuser"
   echo "* -p: password file. Default: /.mypasswd"
+  echo "* -k: encryption key file. Default /.mykey"
 }
 
 ACTION="NA"
 
-while getopts 'd:p:r:u:FIR' c; do
+while getopts 'd:p:r:t:u:FIR' c; do
   case $c in
     d) if [ -d $OPTARG ]; then
-         backupdir=$OPTARG 
+         backupDir=$OPTARG 
        else
          echo "directory $OPTARG does not exist\n";
          help;
@@ -141,6 +159,7 @@ while getopts 'd:p:r:u:FIR' c; do
        fi
        ;;
     r) retention=$OPTARG ;;
+    t) tmpDir=$OPTARG ;;
     u) if [ -f $OPTARG ]; then
          userfile=$OPTARG
        else
@@ -151,6 +170,14 @@ while getopts 'd:p:r:u:FIR' c; do
        ;;
     p) if [ -f $OPTARG ]; then
          passfile=$OPTARG
+       else
+         echo "file $OPTARG does not exist or is not readable\n";
+         help;
+         exit 1;
+       fi
+       ;;
+    k) if [ -f $OPTARG ]; then
+         keyfile=$OPTARG
        else
          echo "file $OPTARG does not exist or is not readable\n";
          help;
@@ -170,32 +197,42 @@ if [ "$ACTION" = "NA" ]; then
 fi
 
 echo "[`date`] directory structure preparation"
-doPrepare $backupdir
+doPrepare $backupDir
 
-echo "[`date`] get credentials"
-user=""
-if [ -f $userfile ]; then
-  user=`cat $userfile`
+if [ ! "$ACTION" = "RESTORE" ]; then
+  echo "[`date`] get credentials"
+  user=""
+  if [ -f $userfile ]; then
+    user=`cat $userfile`
+  fi
+  if [ -z "$user" ]]; then echo "no user found"; help; exit 1; fi
+  
+  passwd=""
+  if [ -f $passfile ]]; then
+    passwd=`cat $passfile`
+  fi
+  if [ -z "$passwd" ]; then echo "no password found"; help; exit 1; fi
 fi
 
-passwd=""
-if [ -f $passfile ]; then
-  passwd=`cat $passfile`
+key=""
+if [ -f $keyfile ]]; then
+  key=`cat $keyfile`
 fi
+if [ -z "$key" ]; then echo "no encryption key found"; help; exit 1; fi
 
-echo "[`date`] run full backup"
 if [ $ACTION = 'FULL' ]; then
-  doFull $backupdir $retention $user $passwd
+  echo "[`date`] run full backup"
+  doFull $backupDir $retention $user $passwd $key $tmpDir
 fi
 
-echo "[`date`] run incremental backup"
 if [ $ACTION = 'INC' ]; then
-  doInc $backupdir $user $passwd
+  echo "[`date`] run incremental backup"
+  doInc $backupDir $user $passwd $key $tmpDir
 fi
 
-echo "[`date`] run restore"
 if [ $ACTION = 'RESTORE' ]; then
-  doRestore $backupdir $restoreDir
+  echo "[`date`] run restore"
+  doRestore $backupDir $key $tmpDir
 fi
 
 echo "[`date`] process ended"
