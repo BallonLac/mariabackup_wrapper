@@ -1,35 +1,32 @@
-/backup/restore: prepared to be restored
-/backup/latest/full: latest full
-/backup/latest/inc
+# mariabackup wrapper
 
-process:
-- full: 
-    rm /backup/archive/full.7
-    mv /backup/archive/full.6 /backup/archive/full.7
-    mv /backup/archive/full.5 /backup/archive/full.6
-    mv /backup/archive/full.4 /backup/archive/full.5
-    mv /backup/archive/full.3 /backup/archive/full.4
-    mv /backup/archive/full.2 /backup/archive/full.3
-    mv /backup/archive/full.1 /backup/archive/full.2
-    mv /backup/archive/full.0 /backup/archive/full.1
-    mv /backup/latest/full /backup/archive/full.0
-    mkdir /backup/latest/full
-    rm -rf /backup/latest/inc*/*
-    echo "0" > /backup/latest/next
-    mariabackup --backup --targetdir=/backup/latest/full ...
-    cp -rp /backup/latest/full /backup/restore.new
-    mariabackup --prepare --targetdir=/backup/restore.new ...
+## wrapper.sh
+``` wrapper.sh -F|R|I [-d <dir>] [-r <num>] [-t <dir>] [-u <file>] [-p <file>] [-k <file>] ```
+* ```-F```: process a full backup
+* ```-I```: process an incremental backup
+* ```-R```: restore to the latest backup
+* ```-d```: backup directory. By default: /backup"
+* ```-r```: retention: number of full backup to keep. By default: 7"
+* ```-t```: working directory. By default: /restore"
+* ```-u```: username file. Default /.myuser"
+* ```-p```: password file. Default: /.mypasswd"
+* ```-k```: encryption key file. Default /.mykey"
 
-    rm -rf /backup/restore
-    mv /backup/restore.new /backup/restore
+-u, -p and -k expect a file; these are 1 line file containing only the required information (username, password, or encryption key)
 
-- inc:
-    cur=`cat /backup/latest/next`
-    echo `expr $cur + 1` > /backup/latest/next
-    prev=`expr $cur - 1`
-    if [ $next -eq 0 ]; then
-      mariabackup --backup --target-dir=/backup/latest/inc0/ --incremental-basedir=/backup/latest/full ...
-    else
-      mariabackup --backup --target-dir=/backup/latest/inc${cur}/ --incremental-basedir=/backup/latest/inc${prev} ...
-    fi
-    mariabackup --prepare --target-dir=/backup/restore --incremental-dir=/backup/latest/inc${cur}
+### full backup
+``` $0 -F ```
+a user (-u), a password (-p) and an encryption key (-k) have to be defined.
+
+The script will make a backup named `full.gz.enc` in the backup directory (-d). If previous backups exists, it will increase the number of the previous backup by 1 and only keep the <retention> number of backup. The previous incremental backups will be removed too. 
+
+### incremental backup
+``` $0 -I ```
+a user (-u), a password (-p) and an encryption key (-k) have to be defined.
+
+The incremental backup will be done as "inc<id>.gz.enc" in the backup directory. If no full backup have been found, the script will run one instead of an incremental.
+
+
+### restore
+``` $0 -R ```
+
