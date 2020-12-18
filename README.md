@@ -13,23 +13,28 @@ This script wraps mariabackup with some little automatisation. With the same scr
 * ```-p```: password file. Default: /.mypasswd"
 * ```-k```: encryption key file. Default /.mykey"
 
--u, -p and -k expect a file; these are 1 line file containing only the required information (username, password, or encryption key)
+```-u```, ```-p``` and ```-k``` expect a file; these are 1 line file containing only the required information (username, password, or encryption key)
 
 ### full backup
-``` $0 -F ```
+``` wrapper.sh -F ```
+
 a user (-u), a password (-p) and an encryption key (-k) have to be defined.
 
 The script will make a backup named `full.gz.enc` in the backup directory (-d). If previous backups exists, it will increase the number of the previous backup by 1 and only keep the <retention> number of backup. The previous incremental backups will be removed too. 
 
 ### incremental backup
-``` $0 -I ```
+``` wrapper.sh -I ```
+
 a user (-u), a password (-p) and an encryption key (-k) have to be defined.
 
 The incremental backup will be done as "inc<id>.gz.enc" in the backup directory. If no full backup have been found, the script will run one instead of an incremental.
 
 
 ### restore
-``` $0 -R ```
+``` wrapper.sh -R ```
+
+only the encryption key is required (-k) . Currently only the latest backup can be restored.
+
 
 ## docker image
 the main goal of this image is to be run as a side-car container to a mariadb server instance. The datadir should be shared between both. It could also be possible to restore the last backup in an init container of the main mariadb container.
