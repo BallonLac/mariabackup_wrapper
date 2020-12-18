@@ -1,0 +1,19 @@
+version: 1.4
+
+prefs:
+  logPath: /home/mysql/jobber.log
+  runLog:
+    type: file
+    path: /home/mysql/jobber.run
+    maxFileLen: 100m
+    maxHistories: 2
+
+jobs:
+  FullMariaBackup:
+    cmd: /wrapper.sh -F
+    time: 0 30 1 * * *
+    onError: Continue
+  IncMariaBackup:
+    cmd: /wrapper.sh -F
+    time: 0 0 * * * *
+    onError: Continue
