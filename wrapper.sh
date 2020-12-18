@@ -78,6 +78,12 @@ doInc(){
   k=$4
   tmp=$5
 
+  if [ ! -f ${dir}/full.gz.enc ]; then
+    echo "[`date`] no previous full backup found. Do first one"
+    doFull $dir 1 $u $p $ $tmp
+    return
+  fi
+
   cur=`cat ${dir}/next`
   if [ ! $? -eq 0 ]; then echo "cannot read $dir/next file"; exit 1; fi
   echo `expr $cur + 1` > ${dir}/next
@@ -220,14 +226,14 @@ if [ -f $keyfile ]]; then
 fi
 if [ -z "$key" ]; then echo "no encryption key found"; help; exit 1; fi
 
-if [ $ACTION = 'FULL' ]; then
-  echo "[`date`] run full backup"
-  doFull $backupDir $retention $user $passwd $key $tmpDir
-fi
-
 if [ $ACTION = 'INC' ]; then
   echo "[`date`] run incremental backup"
   doInc $backupDir $user $passwd $key $tmpDir
+fi
+
+if [ $ACTION = 'FULL' ]; then
+  echo "[`date`] run full backup"
+  doFull $backupDir $retention $user $passwd $key $tmpDir
 fi
 
 if [ $ACTION = 'RESTORE' ]; then
