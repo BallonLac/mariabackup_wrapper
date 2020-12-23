@@ -1,5 +1,6 @@
 FROM mariadb/server:10.5
 
+COPY ./entrypoint.sh /entrypoint.sh
 COPY ./wrapper.sh /wrapper.sh
 COPY ./jobber_1.4.4-1_amd64.deb /jobber_1.4.4-1_amd64.deb
 COPY ./jobber /home/mysql/.jobber
@@ -12,5 +13,5 @@ RUN dpkg -i /jobber_1.4.4-1_amd64.deb
 
 USER 999
 
-ENTRYPOINT [ "/usr/lib/x86_64-linux-gnu/jobberrunner" ]
+ENTRYPOINT [ "/entrypoint.sh" ]
 CMD [ "/home/mysql/.jobber" ]
